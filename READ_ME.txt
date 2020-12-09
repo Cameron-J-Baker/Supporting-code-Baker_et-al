@@ -1,5 +1,4 @@
-Title : 
-Authors :
+Baker, C.,J, C. H. Frère, H. A. Campbell, T. R. Irwin, C. E., Franklin. Membership of crocodile social environments is dictated by male philopatry.
 
 We provide in complicance with the open data policy of the Proceedings of the Royal Society B all of the R code used in the data analysis and prepartion of the 
 manuscript "Membership of crocodile social environment is dictated by male philopatry" which has been submitted for review on the 2020-12-10. All raw data is available from the
