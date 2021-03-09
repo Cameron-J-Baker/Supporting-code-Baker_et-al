@@ -17,7 +17,7 @@ To facilitate the replication of the results and analyses undertaken in the manu
 this respository. Unless stated otherwise, all of the R code contained within this respository was created by Cameron J. Baker. 
 
 All of the code has been formatted to run within the provided R project and folder layout. To complete all of the analyses contained within the manuscript, it is recommended that
-the R scripts be run in the numerical order that they are presented, as the later scripts require the outputs from the initial R script to be run. Contained within each R script is
+the R scripts be run in the numerical order that they are presented, as later scripts require the outputs from the earlier R scripts to be run. Contained within each R script is
 a list of all of the analyses included.
 
 Also included is a folder named R_functions. This folder contains all of the custom R functions that were created in order to perform the analyses. Where required in the primary
