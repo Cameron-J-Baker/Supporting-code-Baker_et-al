@@ -2,7 +2,7 @@
 # 03-12-2020
 # Email: cameron.baker@uqconnect.edu.au
 # Code for the analyses contained within the manuscript "Membership of crocodile social environments is dictated by male 
-# philopatry" that is submitted for review to the Proceedings of the Royal Society B
+# philopatry" that is submitted for review to Behavioral Ecology
 # Aim : To determine the monthly proportion of spatial overlap between conspecifics and then how this is influenced by
 # proximity to the mating season and movement tactic. 
 
