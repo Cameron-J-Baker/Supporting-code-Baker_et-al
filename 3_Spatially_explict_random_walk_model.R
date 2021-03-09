@@ -1,7 +1,8 @@
 # Author: Cameron Baker
 # 03/02/2020
 # cameron.baker@uqconnect.edu.au
-# PhD Capter 1: Spatial structure of the estuarine crocodile
+# Code for the analyses contained within the manuscript "Membership of crocodile social environments is dictated by male 
+# philopatry" that is submitted for review to Behavioral Ecology
 # Aim: Below is the code for the spatially explict random model that was used to simulate the movements of individuals 
 # to determine if the observed HR overlaps between conspecifics were different from chance. 
 
