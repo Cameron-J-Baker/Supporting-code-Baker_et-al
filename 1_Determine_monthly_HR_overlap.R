@@ -20,7 +20,10 @@ library(doParallel)
 library(wicket)
 library(ggmap)
 library(spatstat)
-library(FSA)
+library(effects)
+library(lme4)
+library(emmeans)
+library(performance)
 
 
 ##########################################################################################################################
@@ -98,266 +101,127 @@ stopImplicitCluster() # stop the cluster to return memory and resources to other
 
 # The output of this will be a list containing the HR overlap matrices of each of the months run. The matrices will be
 # in order of the month that they were within the years vector, i.e., years[1] = lmig[1]
+# The output from the monthlyoverlap function are also saved to file to allow the below analyses to be completed without
+# re-running the code above
 
 #---------------------------------------------------------------------------------------------------------------------#
-# For each individual determine the mean HR overlap and number of conspecifics per month. This has been calculated for
-# each combination of movement tactic to examine how the movement tactic of conspecifics influences the social 
-# environment of an individual
+# Import all of the months into a list and then make each data.frame into a matrix
+files <- list.files(path ="Output/lcUD-files", full.names = T) # create a vector list with the names of all files
+files <- files[13:113] # only import the files from 2010-08 onwards
+lmig <- lapply(files, fread) # Import all files using lapply
 
-ID <- unique(croc_categories$TRANSMITTERID) # create a vector of all the crocodile IDs
-
-# To create a list of all the possible combinations, we first created a matrix with each individual and their movement
-# tactic
-moveCat<- function(i, Crocodile_movement_tactics){ 
-  tt <- list()
+# Convert each of the files imported into matrices and move the TRANSMITTERIDs into the rownames and then create a dataframe with the IDs and thier overlaps
+for(i in 1:length(lmig)){
+  lmig[[i]] <- as.data.frame(lmig[[i]]) # convert to data.frame
+  colnames(lmig[[i]]) = lmig[[i]][1, ] # convert the first row back to column names
+  lmig[[i]] = lmig[[i]][-1, ] # remove the first row with the names  
+  rownames(lmig[[i]]) <- c() # remove the current row names
+  lmig[[i]] <- tibble::column_to_rownames(lmig[[i]], var = "NA") # convert iD back into row.names
   
-  indiv <- Crocodile_movement_tactics[TRANSMITTERID == ID[i]]
-  tt <- paste(indiv$Class,Crocodile_movement_tactics$Class, sep = "")
-}
-
-movMatrix <- foreach(i = 1:nrow(Crocodile_movement_tactics), .combine = "cbind") %do% moveCat(i, categories)
-rownames(movMatrix) <- as.character(ID) # rename the columns to their respective CrocIDs
-colnames(movMatrix) <- as.character(ID) # rename the rows to their respective CrocIDs
-# Reduce to only one version of each column
-movMatrix[movMatrix == "FemaleResident"] <- "ResidentFemale"
-movMatrix[movMatrix == "FemaleNomadic"] <- "NomadicFemale"
-movMatrix[movMatrix == "NomadicResident"] <- "ResidentNomadic"
-
-# Convert the size matrix to a list
-moveClasses <- na.omit(as.data.table(as.table(movMatrix, na="", row.names=T, col.names=T))) # converts from matrix to table
-names(moveClasses) <- c("ID1", "ID2","Class") # Rename the columns 
-
-#-----------------------------------------------------------------------#
-# Create a lists of the Resident and high movement males IDs
-ID <- unique(croc_categories$TRANSMITTERID) # All individuals
-Resident <- unique((subset(croc_categories, Class == "Resident"))$TRANSMITTERID) # create a list of the Resident individuals
-High <- unique((subset(croc_categories, Class == "High"))$TRANSMITTERID) # create a list of the Nomadic individuals
-Females <- unique((subset(croc_categories, Class == "Female"))$TRANSMITTERID)
-
-meanON <- list()
-timepoints <- years
-for(i in 1:length(lmig)) { # Do the following for each month
-  
-  monthDat <- lmig[[i]] # Extract the month of interest
-  # Remove the individuals not found in croc_categories as they are not of interest for this study
-  monthDat <- monthDat[rownames(monthDat) %in% ID, ]
-  monthDat <- monthDat[ , colnames(monthDat) %in% ID]
-  # Convert the matrix to a list
+  lmig[[i]] <- as.matrix(lmig[[i]])
   # set the upper half and diagonal of the matrix to NA
-  monthDat[upper.tri(monthDat, diag = T)] <- NA 
+  lmig[[i]][upper.tri(lmig[[i]], diag = T)] <- NA 
   # This code converts the matrix to a data.frame with only the lower triangle of the matrix excluding the diagonal
-  monthDat <- na.omit(as.data.table(as.table(monthDat, na="", row.names=T, col.names=T))) # converts from matrix to table
-  names(monthDat) <- c("ID1", "ID2","HRoverlap") # Rename the columns
-  monthDat <- as.data.table( plyr::join(monthDat, moveClasses, by = c("ID1", "ID2")))
-  monthDat <- monthDat[HRoverlap >= 0.01] # remove any dyds that are less than 1% to avoid including dyads that don't overlap
-  # First go through and create subsets of the overlap data to only include the groups of interest
-  Resident_overlap <- monthDat[Class == "ResidentResident"] # extract just the Resident movement males to all others
-  Nomadic_overlap <- monthDat[Class == "NomadicNomadic"] # extract just the Nomadic movement males to all others
-  ResidentFemList <- monthDat[Class == "ResidentF"]
-  NomadicFemList <- monthDat[Class == "NomadicF"]
-  femFemlist <- monthDat[Class == "FF"]
-  ResidentNomadic_overlap <- monthDat[Class == "ResidentNomadic"]
-  
-  #-------------------------------------------------------------------------------------------------------------#
-  # Next for each of the male individuals present, determine their mean overlap and number of overlapping individuals
-  # with other males/females within each group 
-  overlap_Resident <- list()
-  for(u in 1:length(Resident)){
-    indiv <- Resident_overlap[ID1 == Resident[u]| ID2 == Resident[u]]
-    indivCat <- categories[TRANSMITTERID == Resident[u]]
-    
-    overlap_Resident[[u]] <- data.table(ID = Resident[u],
-                                   Size = indivCat$Size,
-                                   HRoverlap = mean(indiv$HRoverlap),
-                                   No.Indivs = nrow(indiv),
-                                   Class = "Resident",
-                                   Sex = "MM",
-                                   Month = timepoints[i])
+  lmig[[i]] <- na.omit(as.data.table(as.table(lmig[[i]], na="", row.names=T, col.names=T))) # converts from matrix to table
+  names(lmig[[i]]) <- c("ID1", "ID2","HRoverlap") # Rename the columns
+  lmig[[i]]$Month <- substr(files[i], 36, 42)
+  lmig[[i]] <- lmig[[i]][HRoverlap >= 0.01] # remove any dyds that are less than 1% to avoid including dyads that don't overlap
+  #lmig[[i]] <- as.data.table( plyr::join(lmig[[i]], moveClasses, by = c("ID1", "ID2")))
   }
-  ResidentMGroups <- data.table(Reduce(rbind, overlap_Resident))
-  
-  overlap_Nomadic <- list()
-  for(t in 1:length(Nomadic)){
-    indiv <- Nomadic_overlap[ID1 == Nomadic[t]| ID2 == Nomadic[t]]
-    indivCat <- categories[TRANSMITTERID == Nomadic[t]]
-    
-    overlap_Nomadic[[t]] <- data.table(ID = Nomadic[t],
-                                    Size = indivCat$Size,
-                                    HRoverlap = mean(indiv$HRoverlap),
-                                    No.Indivs = nrow(indiv),
-                                    Class = "Nomadic",
-                                    Sex = "MM",
-                                    Month = timepoints[i])
-  }
-  NomadicMGroups <- data.table(Reduce(rbind, overlap_Nomadic))
-  
-  overlap_ResidentNomadic <- list()
-  for(t in 1:length(Nomadic)){
-    indiv <- ResidentNomadic_overlap[ID1 == Nomadic[t]| ID2 == Nomadic[t]]
-    indivCat <- categories[TRANSMITTERID == Nomadic[t]]
-    
-    overlap_ResidentNomadic[[t]] <- data.table(ID = Nomadic[t],
-                                       Size = indivCat$Size,
-                                       HRoverlap = mean(indiv$HRoverlap),
-                                       No.Indivs = nrow(indiv),
-                                       Class = "ResidentNomadic",
-                                       Sex = "MM",
-                                       Month = timepoints[i])
-  }
-  ResidentNomadicMGroups <- data.table(Reduce(rbind, overlap_ResidentNomadic))
-  
-  overlap_ResidentF <- list()
-  for(e in 1:length(Resident)){
-    indiv <- ResidentFemList[ID1 == Resident[e]| ID2 == Resident[e]]
-    indivCat <- categories[TRANSMITTERID == Resident[e]]
-    
-    overlap_ResidentF[[e]] <- data.table(ID = Resident[e],
-                                    Size = indivCat$Size,
-                                    HRoverlap = mean(indiv$HRoverlap),
-                                    No.Indivs = nrow(indiv),
-                                    Class = "ResidentF",
-                                    Sex = "MF",
-                                    Month = timepoints[i])
-  }
-  ResidentFGroups <- data.table(Reduce(rbind, overlap_ResidentF))
-  
-  overlap_NomadicF <- list()
-  for(q in 1:length(Nomadic)){
-    indiv <- NomadicFemList[ID1 == Nomadic[q]| ID2 == Nomadic[q]]
-    indivCat <- categories[TRANSMITTERID == Nomadic[q]]
-    
-    overlap_NomadicF[[q]] <- data.table(ID = Nomadic[q],
-                                     Size = indivCat$Size,
-                                     HRoverlap = mean(indiv$HRoverlap),
-                                     No.Indivs = nrow(indiv),
-                                     Class = "NomadicF",
-                                     Sex = "MF",
-                                     Month = timepoints[i])
-  }
-  NomadicFGroups <- data.table(Reduce(rbind, overlap_NomadicF))
-  
-  overlap_F <- list()
-  for(o in 1:length(Females)){
-    indiv <- femFemlist[ID1 == Females[o]| ID2 == Females[o]]
-    indivCat <- categories[TRANSMITTERID == Females[o]]
-    
-    overlap_F[[o]] <- data.table(ID = Females[o],
-                                 Size = indivCat$Size,
-                                 HRoverlap = mean(indiv$HRoverlap),
-                                 No.Indivs = nrow(indiv),
-                                 Class = "F",
-                                 Sex = "FF",
-                                 Month = timepoints[i])
-  }
-  FGroups <- data.table(Reduce(rbind, overlap_F))
-  
-  # Combine the above data.frames into a single one
-  meanON[[i]] <- rbind(ResidentMGroups, NomadicMGroups,ResidentNomadicMGroups, ResidentFGroups, NomadicFGroups,FGroups)
-}
 
-crocOverlap_neighbours <- data.table(Reduce(rbind, meanON))
+lmig2 <- plyr::compact(lmig)
 
-crocOverlap_neighbours <- na.omit(crocOverlap_neighbours)
+#View(lmig2[[1]])
 
-# Write a copy to avoid having to rerun all of the above code again
-write.csv(crocOverlap_neighbours, "Data/Output/monthly_overlap.csv")
+# Now convert the HR overlap matrices into a dataframe with the IDs of each individual
+monthly_overlaps <- rbindlist(lmig2)
 
-#######################################################################################################################
-# What is the influence of movement tactic and proximity to the mating season on HR overlap ##########################
-#######################################################################################################################
+# Next, import the movement tactic of each animal and then attach it to hte HR overlaps for each one of the dyads
+categories <- fread("Data/Metrics/Croc_categories_updated_V2.csv") # import the category of each individual
 
-# Import the monthly HR overlap for each individual
-crocOverlap_neighbours <- fread("Data/Output/monthly_overlap.csv")
+# Next create two dataframes, one for ID1 and then another for ID2 so that the movement tactics of each indivdual can be assigned
+ID1_cat <- data.table(ID1 = categories$TRANSMITTERID,
+                      ID1_tactic = categories$Class)
+ID2_cat <- data.table(ID2 = categories$TRANSMITTERID,
+                      ID2_tactic = categories$Class)
 
-# Add a season column. August - November defined as the breeding season
-crocOverlap_neighbours$Season <- ifelse(as.numeric(substr(crocOverlap_neighbours$Month, 6,7)) >= 8 & as.numeric(substr(crocOverlap_neighbours$Month, 6,7)) < 12, "Breeding", "Non-breeding")
+# join the two datasets to the overlaps dataframe
+monthly_overlaps <- monthly_overlaps |>
+  plyr::join(ID1_cat, by = "ID1") |>
+  plyr::join(ID2_cat, by = "ID2")
 
-# To account for how the different sex combinations may influence the amount of overlap between conspecifics, subset
-# out all of the different possibilities
-MMoverlap_neighbours <- crocOverlap_neighbours[Sex == "MM"]
-MFoverlap_neighbours <- crocOverlap_neighbours[Sex == "MF"]
-FFoverlap_neighbours <- crocOverlap_neighbours[Sex == "FF"]
+# As there are some indivduals included who do not have a movement tactic assigned, use NA omit to remove them from the data set
+monthly_overlaps <- na.omit(monthly_overlaps)
 
-###=================================================================================================================###
-# For each of the different sex combinations, determine the mean proportion of HR overlap that an individual has with
-# conspecifics for each of the two seasons
+# Next, create the dyad and dyad tactic column
+monthly_overlaps$Dyads <- paste0(monthly_overlaps$ID1, "-", monthly_overlaps$ID2)
+monthly_overlaps$Tactic <- paste0(monthly_overlaps$ID1_tactic, "-", monthly_overlaps$ID2_tactic)
 
-# Do the male - male combinations first
+# Check how many different types of dyad tactics are present
+unique(monthly_overlaps$Tactic)
 
-#-----------------------------------------------------------------------------#
-# Subset out the Resident Nomadic combinations to run them independently to avoid it getting lumped in with the low individuals values
-MMResNomB <- MMoverlap_neighboursB[Class == "ResidentNomadic"]
-MMResNomNB <- MMoverlap_neighboursNB[Class == "ResidentNomadic"]
-MMoverlap_neighboursB <- MMoverlap_neighboursB[Class != "ResidentNomadic"]
-MMoverlap_neighboursNB <- MMoverlap_neighboursNB[Class != "ResidentNomadic"]
-# Determine the mean overlap with males per month
-MMoverlapB <- MMoverlap_neighboursB[,.(Mean.overlap = mean(HRoverlap, na.rm = T), SE.overlap = plotrix::std.error(HRoverlap, na.rm = T), 
-                                       Mean.indivs= mean(No.Indivs, na.rm = T), SE.indivs = plotrix::std.error(No.Indivs, na.rm = T),
-                                       Class = Class[1], Season = Season[1], Length = mean(Length)), by = TRANSMITTERID]
-MMoverlapNB <- MMoverlap_neighboursNB[,.(Mean.overlap = mean(HRoverlap, na.rm = T), SE.overlap = plotrix::std.error(HRoverlap, na.rm = T), 
-                                         Mean.indivs= mean(No.Indivs, na.rm = T), SE.indivs = plotrix::std.error(No.Indivs, na.rm = T),
-                                         Class = Class[1], Season = Season[1], Length = mean(Length)), by = TRANSMITTERID]
-MMoverlapRNB <- MMResNomB[,.(Mean.overlap = mean(HRoverlap, na.rm = T), SE.overlap = plotrix::std.error(HRoverlap, na.rm = T), 
-                              Mean.indivs= mean(No.Indivs, na.rm = T), SE.indivs = plotrix::std.error(No.Indivs, na.rm = T),
-                              Class = Class[1], Season = Season[1], Length = mean(Length)), by = TRANSMITTERID]
-MMoverlapRNNB <- MMResNomNB[,.(Mean.overlap = mean(HRoverlap, na.rm = T), SE.overlap = plotrix::std.error(HRoverlap, na.rm = T), 
-                                Mean.indivs= mean(No.Indivs, na.rm = T), SE.indivs = plotrix::std.error(No.Indivs, na.rm = T),
-                                Class = Class[1], Season = Season[1], Length = mean(Length)), by = TRANSMITTERID]
+# Recode the values so that only Low-Low, Low-High, Low-F, High-High, High-F and F-F are present
+monthly_overlaps$Tactic <- ifelse(monthly_overlaps$Tactic == "Nomadic-Resident", "Resident-Nomadic", 
+                                  ifelse(monthly_overlaps$Tactic == "Female-Resident", "Resident-Female", 
+                                         ifelse(monthly_overlaps$Tactic == "Female-Nomadic", "Nomadic-Female", monthly_overlaps$Tactic)))
+# Then remove the unncessary columns
+monthly_overlaps$ID1_tactic <- monthly_overlaps$ID2_tactic <- NULL
 
-MMoverlap <- rbind(MMoverlapB,MMoverlapNB,MMoverlapRNB,MMoverlapRNNB) # combine the two
+#------------------------------------------------------------------#
+# Assign each overlap to the month and then season (mating/non-mating) season they occurred
+monthly_overlaps$Year <- substr(monthly_overlaps$Month, 1,4) # create a column for year so it can potentially be used as a random effect
+# then redo the month column to only have the month of interest present
+monthly_overlaps$Month <- ifelse(substr(monthly_overlaps$Month, 6,6) == 1,substr(monthly_overlaps$Month, 6,7), substr(monthly_overlaps$Month, 7,7) )
+# Now create the season column. August - Novemeber is the Mating season
+monthly_overlaps$Season <- ifelse(monthly_overlaps$Month < 8 & monthly_overlaps$Month > 11, "Non-mating", "Mating")
 
-###-----------------------------------------------------------------------------------------------------------------###
-# Male - female combinations
+######################################################################################################################################################################
+# The data is now ready to model
 
-MFoverlap_neighboursB <- MFoverlap_neighbours[Season == "Breeding"]
-MFoverlap_neighboursNB <- MFoverlap_neighbours[Season == "Non-breeding"]
+# First make sure that each variable is in the correct format
+str(monthly_overlaps)
 
-# Determine the mean overlap with males per month
-MFoverlapB <- MFoverlap_neighboursB[,.(Mean.overlap = mean(HRoverlap, na.rm = T), SE.overlap = plotrix::std.error(HRoverlap, na.rm = T), 
-                                       Mean.indivs= mean(No.Indivs, na.rm = T), SE.indivs = plotrix::std.error(No.Indivs, na.rm = T),
-                                       Class = Class[1], Season = Season[1], Length = mean(Length)), by = TRANSMITTERID]
-MFoverlapNB <- MFoverlap_neighboursNB[,.(Mean.overlap = mean(HRoverlap, na.rm = T), SE.overlap = plotrix::std.error(HRoverlap, na.rm = T), 
-                                         Mean.indivs= mean(No.Indivs, na.rm = T), SE.indivs = plotrix::std.error(No.Indivs, na.rm = T),
-                                         Class = Class[1], Season = Season[1], Length = mean(Length)), by = TRANSMITTERID]
-MFoverlap <- rbind(MFoverlapB,MFoverlapNB) # combine the two
+# Make each of the variables into factors
+monthly_overlaps$Month <- as.factor(monthly_overlaps$Month)
+monthly_overlaps$Dyads <- as.factor(monthly_overlaps$Dyads)
+monthly_overlaps$Tactic <- as.factor(monthly_overlaps$Tactic)
+monthly_overlaps$Season <- as.factor(monthly_overlaps$Season)
 
-###-----------------------------------------------------------------------------------------------------------------###
-# Finally do the female - female combinations
-FFoverlap_neighboursB <- FFoverlap_neighbours[Season == "Breeding"]
-FFoverlap_neighboursNB <- FFoverlap_neighbours[Season == "Non-breeding"]
+# Visualise the trends within the raw data
+ggplot()+
+  geom_boxplot(data = monthly_overlaps, aes(x = Tactic, y = HRoverlap, colour = Season))
+ggplot()+
+  geom_boxplot(data = monthly_overlaps, aes(x = Season, y = HRoverlap))
 
-# Determine the mean overlap with males per month
-FFoverlapB <- FFoverlap_neighboursB[,.(Mean.overlap = mean(HRoverlap, na.rm = T), SE.overlap = plotrix::std.error(HRoverlap, na.rm = T), 
-                                       Mean.indivs= mean(No.Indivs, na.rm = T), SE.indivs = plotrix::std.error(No.Indivs, na.rm = T),
-                                       Class = Class[1], Season = Season[1], Length = mean(Length)), by = TRANSMITTERID]
-FFoverlapNB <- FFoverlap_neighboursNB[,.(Mean.overlap = mean(HRoverlap, na.rm = T), SE.overlap = plotrix::std.error(HRoverlap, na.rm = T), 
-                                         Mean.indivs= mean(No.Indivs, na.rm = T), SE.indivs = plotrix::std.error(No.Indivs, na.rm = T),
-                                         Class = Class[1], Season = Season[1], Length = mean(Length)), by = TRANSMITTERID]
-FFoverlap <- rbind(FFoverlapB,FFoverlapNB) # combine the two
+#----------------------------------# 
+# create the model
+model1 <- lmer(sqrt(HRoverlap) ~ Tactic * Season + (1|Dyads), data = monthly_overlaps)
 
-###----------------------------------------------------------------------------------------------------------------###
-# Combine each of these datasets together to perform the analysis on
-Overlaps <- rbind(MMoverlap, MFoverlap, FFoverlap)
+check_model(model1) # check that the model meets all of the assumptions of linear regression
 
-# Set the order of class for plotting the data
-Overlaps$Class <- factor(Overlaps$Class,levels = 
-                           c("FemaleFemale","ResidentFemale","NomadicFemale","Resident","Nomadic","ResidentNomadic"))
-# rename the classes for creating the plot of the manuscript
-Overlaps$Class <- ifelse(Overlaps$Class == "FemaleFemale", "Female-Female",
-                         ifelse(Overlaps$Class == "ResidentFemale", "Resident-Female",
-                                ifelse(Overlaps$Class == "NomadicFemale", "Nomadic-Female",
-                                       ifelse(Overlaps$Class == "Resident", "Resident-Resident",
-                                              ifelse(Overlaps$Class == "Nomadic", "Nomadic-Nomadic", "Resident-Nomadic")))))
-# Finally set the order of the different movement tactics to create the plot
-Overlaps$Class <- factor(Overlaps$Class,levels = 
-                           c("Nomadic-Female","Resident-Nomadic", "Female-Female","Resident-Female","Nomadic-Nomadic","Resident-Resident"))
-# create the plot for Figure 3 of the manuscript. Final edits to the Figure where then made in Adobe Illustrator 
-p1 <- ggplot()+
-  geom_boxplot(data = Overlaps, aes(x = Class, y = Mean.overlap, fill = Season))+
-  ylab("Proportion of home range overlap (%)")+
-  xlab("Crocodile movement strategy")+
-  #ylim(0,16)+
-  scale_fill_manual(values = c("#4b7a2b","#c9dbb4"))+
+car::Anova(model1, test.statistic = "F") # Use the Anova function to determine what the significant values are
+
+summary(model2)
+
+
+emmeans(model1, list(pairwise ~ Tactic:Season), adjust = "tukey") # run a Tukey post hoc test using the estimated marginal means to see where the significant differences are
+
+lsmeans::lsmeans(model1, pairwise~Tactic:Season, adjust="tukey") # just to validate things, also run a Tukey post hoc using the least square means as well
+
+preditions <- as.data.table(predictorEffect("Tactic", model1)) # get the predictions and 95% confidence intervals from the model
+preditions$Tactic <- factor(preditions$Tactic,levels = 
+                       c("Nomadic-Female","Resident-Nomadic", "Female-Female","Resident-Female","Nomadic-Nomadic","Resident-Resident"))
+monthly_overlaps$Tactic <- factor(monthly_overlaps$Tactic,levels = 
+                                    c("Nomadic-Female","Resident-Nomadic", "Female-Female","Resident-Female","Nomadic-Nomadic","Resident-Resident"))
+
+# Create Figure 3 of the manuscript
+ggplot()+
+  geom_point(data = monthly_overlaps, aes(x = Tactic, y = HRoverlap, shape = Season), 
+             position = position_jitterdodge(dodge.width = 0.6, jitter.width = 0.3), alpha = 0.7, colour = "grey")+
+  geom_point(data = preditions, aes(x = Tactic, y = (fit)^2, shape = Season), size = 3, position = position_dodge(width = 0.6))+
+  geom_errorbar(data = preditions, aes(x= Tactic, ymin= (lower)^2 , ymax= (upper)^2, shape = Season),# add in the standard deviation as error bars
+                width=0.1, position = position_dodge(width = 0.6)) +
+  ylab("Proportion of home range overlap (%)") + xlab("Crocodile movement tactic")+
   theme(axis.line = element_line(colour = "black"),
         axis.text.x=element_text(colour="black"),
         axis.text.y=element_text(colour="black"),
@@ -366,56 +230,5 @@ p1 <- ggplot()+
         panel.grid.minor = element_blank(),
         panel.border = element_blank(),
         panel.background = element_blank(),
-        legend.key = element_rect(fill = "white"))
-p1
-
-# Check the homogentiy of the data
-car::leveneTest(Mean.overlap~Class*Season, Overlaps) # Non-homogenity in the data, need to switch to non-parametric test
-
-#------------------------------------------------------W
-# To determine if there is an impact of class within season, sepearate Kruskal-Wallis tests were performed for each season
-# breeding
-breeding <- Overlaps[Season == "Breeding"]
-kruskal.test(Mean.overlap~Class, data = breeding)
-dunnTest(Mean.overlap~Class,
-         data=breeding,
-         method="bh")
-
-#non-breeding
-non_breeding <- Overlaps[Season == "Non-breeding"]
-kruskal.test(Mean.overlap~Class, data = non_breeding)
-dunnTest(Mean.overlap~Class,
-         data=non_breeding,
-         method="bh")
-
-###===================================================####
-# Now within classes, is there an impact of season?
-#resid-resid
-RR <- Overlaps[Class == "Resident-Resident"]
-kruskal.test(Mean.overlap~Season, data = RR)
-
-#nomad-nomad
-NN <- Overlaps[Class == "Nomadic-Nomadic"]
-kruskal.test(Mean.overlap~Season, data = NN)
-
-#resid-Nomad
-RN <- Overlaps[Class == "Resident-Nomadic"]
-kruskal.test(Mean.overlap~Season, data = RN)
-
-#female-female
-FF <- Overlaps[Class == "Female-Female"]
-kruskal.test(Mean.overlap~Season, data = FF)
-
-#resid-resid
-RF <- Overlaps[Class == "Resident-Female"]
-kruskal.test(Mean.overlap~Season, data = RF)
-
-#nomadic-female
-NF <- Overlaps[Class == "Nomadic-Female"]
-kruskal.test(Mean.overlap~Season, data = NF)
-
-#===========================================#
-# Does male movement strat influence overlap with females?
-kruskal.test(Mean.overlap~Class, data = MFoverlap)
-
-
+        legend.key = element_rect(fill = "transparent"),
+        legend.position = c(0.1,0.95))
