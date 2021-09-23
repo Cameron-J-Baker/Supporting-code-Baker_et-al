@@ -1,8 +1,8 @@
 # Supporting-code-Baker_et-al
 The code from Baker et al. submitted for review at Behvaioral Ecology
-Baker, C.,J, C. H. Frère, H. A. Campbell, T. R. Irwin, C. E., Franklin. Membership of crocodile social environments is dictated by male philopatry.
+Baker, C.,J, C. H. Frère, H. A. Campbell, T. R. Irwin, C. E., Franklin.Crocodile social environments dictated by male philopatry.
 
-We provide the supporting R code that was used in the data analysis and prepartion of the manuscript "Membership of crocodile social environment is dictated by male philopatry" which has been submitted for review on the 2021-01-05. All raw data is available from the Dryad Digital Respository: TO BE ADDED UPON ACCEPTANCE OF THE MANUSCRIPT 
+We provide the supporting R code that was used in the data analysis and prepartion of the manuscript "Membership of crocodile social environment is dictated by male philopatry" which has been submitted for review on the 2021-01-05. All raw data is available from the Dryad Digital Respository: https://doi.org/10.5061/dryad.mw6m905vw (currently unavailable until acceptance of the manuscript)
 
 The R code to classify the movement tactics of male crocodiles has not been included within this respository, as it was originally developed by Kaitlin Barham as part of her 
 Honours degree. All code relating to this methodology is currently under embargo until her currently in preparation manuscript has been accepted for publication. An advanced 
