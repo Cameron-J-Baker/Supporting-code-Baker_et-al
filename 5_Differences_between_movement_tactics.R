@@ -2,7 +2,7 @@
 # 03-12-2020
 # Email: cameron.baker@uqconnect.edu.au
 # Code for the analyses contained within the manuscript "Membership of crocodile social environments is dictated by male 
-# philopatry" that is submitted for review to Behavioral Ecology
+# philopatry" that is submitted for review to the Proceedings of the Royal Society B
 # Aim : To compare the mean monthly distance travelled, home range size and proportion of home range overlap with the
 # previous month between each of the three movement tactics
 
@@ -19,6 +19,9 @@ library(raster)
 library(lubridate)
 library(gdistance)
 library(maptools)
+library(lme4)
+library(performance)
+library(effects)
 
 #######################################################################################################################
 #### 1 : Examine how the mean monthly distance moved varies between each movement tactic
@@ -86,61 +89,34 @@ for(i in 1:length(myids)){
 
 monthlyDists <- data.table(Reduce(rbind, monthlyDists))
 
-# Now determine the mean distance travelled by individuals of each movement class per month
-move_strats <- c("Low", "High", "F" )
+# conduct a linear model on the influence of movement tactic on the distance moved per month
+# first visualise the data
+ggplot()+
+  geom_boxplot(data = monthlyDists, aes(x = Class, y = Total.dist))
 
-meanMonthDist <- list()
-for(i in 1:length(move_strats)){
-  strat <- monthlyDists[Class == move_strats[i]]
-  # convert month to just calender month
-  strat$Month <- substr(strat$Month, 6,7)
-  
-  meanMonthDist[[i]] <-  strat[,.(Mean.dist = mean(Total.dist, na.rm = T), 
-                                  SE.dist = plotrix::std.error(Total.dist, na.rm = T),
-                                  Class = move_strats[i]), by = Month]
-}
+# check the normality of the distances traveled
+hist(sqrt(monthlyDists$Total.dist + 0.01))
 
-meanMonthDist <- data.table(Reduce(rbind, meanMonthDist))
+model1 <- lmer(sqrt(Total.dist+0.01) ~ Class + (1|TRANSMITTERID), data = monthlyDists)
 
-car::leveneTest(Mean.dist~Class,meanMonthDist) # Non-homogenity in the data, need to switch to non-parametric test
+check_model(model1)
 
-kruskal.test(Mean.dist~Class, data = meanMonthDist)
-dunnTest(Mean.dist~Class,
-         data = meanMonthDist,
-         method="bh")
+car::Anova(model1, test.statistic = "F")
 
-# Now set the different months into the same order as above and conert from numbers to abbreviations
-meanMonthDist$Month <- factor(meanMonthDist$Month,levels = 
-                                c("06","07","08","09","10","11","12","01","02","03","04","05"))
-meanMonthDist$Month <- ifelse(meanMonthDist$Month == "01", "Jan",
-                              ifelse(meanMonthDist$Month == "02", "Feb",
-                                     ifelse(meanMonthDist$Month == "03", "Mar",
-                                            ifelse(meanMonthDist$Month == "04", "Apr",
-                                                   ifelse(meanMonthDist$Month == "05", "May",
-                                                          ifelse(meanMonthDist$Month == "06", "Jun",
-                                                                 ifelse(meanMonthDist$Month == "07", "Jul",
-                                                                        ifelse(meanMonthDist$Month == "08", "Aug",
-                                                                               ifelse(meanMonthDist$Month == "09", "Sep",
-                                                                                      ifelse(meanMonthDist$Month == "10", "Oct",
-                                                                                             ifelse(meanMonthDist$Month == "11", "Nov", "Dec")))))))))))
+lsmeans::lsmeans(model1, pairwise~Class, adjust="tukey") 
 
-meanMonthDist$Month <- factor(meanMonthDist$Month,levels = 
-                                c("Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May"))
+# Get the model predictions and then plot them to create panel one of supplementary figure 2
+Dist_travelled <- as.data.table(predictorEffect("Class", model1))
 
 #=============================================================================================================#
 # Create the plot to visulise what is occurring
 
 p1 <- ggplot()+
-  geom_point(data = meanMonthDist, aes(x = Month, y = Mean.dist, colour = Class))+
-  geom_rect(data = meanMonthDist, aes(xmin="Nov", xmax="Aug", ymin=0, ymax=Inf), alpha = 0.1, fill = "grey70")+
-  geom_point(data = meanMonthDist, aes(x = Month, y = Mean.dist, colour = Class))+
-  geom_line(data = meanMonthDist, aes(x = Month, y = Mean.dist, group = Class, colour = Class),
-            linetype=3, size = 1)+
-  geom_errorbar(data = meanMonthDist, aes(x= Month, ymin= Mean.dist-SE.dist, ymax= Mean.dist+SE.dist, colour = Class),
+  geom_point(data = monthlyDists, aes(x = Class, y = Total.dist), position = "jitter", alpha = 0.3, colour = "grey50")+
+  geom_point(data = Dist_travelled, aes(x = Class, y = (fit)^2))+
+  geom_errorbar(data = Dist_travelled, aes(x= Class, ymin= (lower)^2, ymax= (upper)^2),
                 width=.2,                    # Width of the error bars
                 position=position_dodge(.0))+
-  scale_colour_manual(values = c( "#5B3677","#AF1212","#039393"))+
-  ylim(0,200)+
   xlab("")+
   ylab("Monthly distance travelled (km)")+
   theme(axis.line = element_line(colour = "black"),
@@ -198,63 +174,38 @@ monthlyHR <- plyr::join(monthlyHR, croc_categories, by = "TRANSMITTERID")
 # Remove all of the individual who are not included in the analysis that could not be classified into a movement class
 monthlyHR <- na.omit(monthlyHR)
 
-#-----------------------------------------------------------------#
-# Determine the mean monthly HR size for each movement class
-# Now determine the mean distance travelled by individuals of each movement class per month
-move_strats <- c("Resident", "Nomadic", "Female" )
+monthlyHR <- monthlyHR[Month >= "2010-08"]
 
-meanMonthHR <- list()
-for(i in 1:length(move_strats)){
-  strat <- monthlyHR[Class == move_strats[i]]
-  # convert month to just calender month
-  strat$Month <- substr(strat$Month, 6,7)
-  
-  meanMonthHR[[i]] <-  strat[,.(Mean.HR = mean(lcUD95, na.rm = T), 
-                                SE.HR = plotrix::std.error(lcUD95, na.rm = T),
-                                Class = move_strats[i]), by = Month]
-}
+### Run the analysis but using a linear mixed effect model instead of a Kuralis wallis test below
+# first visualise the data
+ggplot()+
+  geom_boxplot(data = monthlyHR, aes(x = Class, y = lcUD95))
 
-meanMonthHR <- data.table(Reduce(rbind, meanMonthHR))
+# check the normality of the distances traveled
+hist(log(monthlyHR$lcUD95))
 
-car::leveneTest(Mean.HR~Class,meanMonthHR) # Non-homogenity in the data, need to switch to non-parametric test
+model2 <- lmer(log(lcUD95) ~ Class + (1|TRANSMITTERID), data = monthlyHR)
 
-kruskal.test(Mean.HR~Class, data = meanMonthHR)
-dunnTest(Mean.HR~Class,
-         data=meanMonthHR,
-         method="bh")
+check_model(model2)
 
-# Now set the different months into the same order as above and conert from numbers to abbreviations
-meanMonthHR$Month <- factor(meanMonthHR$Month,levels = 
-                              c("06","07","08","09","10","11","12","01","02","03","04","05"))
-meanMonthHR$Month <- ifelse(meanMonthHR$Month == "01", "Jan",
-                            ifelse(meanMonthHR$Month == "02", "Feb",
-                                   ifelse(meanMonthHR$Month == "03", "Mar",
-                                          ifelse(meanMonthHR$Month == "04", "Apr",
-                                                 ifelse(meanMonthHR$Month == "05", "May",
-                                                        ifelse(meanMonthHR$Month == "06", "Jun",
-                                                               ifelse(meanMonthHR$Month == "07", "Jul",
-                                                                      ifelse(meanMonthHR$Month == "08", "Aug",
-                                                                             ifelse(meanMonthHR$Month == "09", "Sep",
-                                                                                    ifelse(meanMonthHR$Month == "10", "Oct",
-                                                                                           ifelse(meanMonthHR$Month == "11", "Nov", "Dec")))))))))))
+car::Anova(model2, test.statistic = "F")
+anova(model2)
 
-meanMonthHR$Month <- factor(meanMonthHR$Month,levels = 
-                              c("Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May"))
+lsmeans::lsmeans(model2, pairwise~Class, adjust="tukey") 
 
-monthlyHR$Class <- factor(monthlyHR$Class, levels = c("Nomadic", "Resident", "Female"))
+# Get the model predictions and then plot them to create panel two of supplementary figure 2
+HR_size <- as.data.table(predictorEffect("Class", model2))
+
+#=============================================================================================================#
+# Create the plot to visulise what is occurring
 
 p2 <- ggplot()+
-  geom_point(data = meanMonthHR, aes(x = Month, y = Mean.HR, colour = Class))+
-  geom_rect(data = meanMonthHR, aes(xmin="Nov", xmax="Aug", ymin=0, ymax=Inf), alpha = 0.1, fill = "grey70")+
-  geom_point(data = meanMonthHR, aes(x = Month, y = Mean.HR, colour = Class))+
-  geom_line(data = meanMonthHR, aes(x = Month, y = Mean.HR, group = Class, colour = Class),
-            linetype=3, size = 1)+
-  geom_errorbar(data = meanMonthHR, aes(x= Month, ymin= Mean.HR-SE.HR, ymax= Mean.HR+SE.HR, colour = Class),
+  geom_point(data = monthlyHR, aes(x = Class, y = lcUD95), position = "jitter", alpha = 0.3, colour = "grey50")+
+  geom_point(data = HR_size, aes(x = Class, y = exp(fit)))+
+  geom_errorbar(data = HR_size, aes(x= Class, ymin= exp(lower), ymax= exp(upper)),
                 width=.2,                    # Width of the error bars
                 position=position_dodge(.0))+
-  scale_colour_manual(values = c( "#5B3677","#AF1212","#039393"))+
-  ylim(0,25)+
-  xlab("Month")+
+  xlab("Movement tactic")+
   ylab("Monthly home range size " ~(km^2))+
   theme(axis.line = element_line(colour = "black"),
         axis.text.x=element_text(colour="black"),
@@ -265,14 +216,14 @@ p2 <- ggplot()+
         panel.border = element_blank(),
         panel.background = element_blank(),
         legend.key = element_rect(fill = "white"),
-        legend.position = "none")
-p1
+        legend.position = c(0.84,0.9))
+p2
 
 ###---------------------------------------------------------------------------------------------------------------####
 # Create Figure 2 of the manuscript by combining the last two ggplots created
 
 figure <- ggarrange(p1,p2,
-                    #labels = c("a)", "b)"),
+                    labels = c("a)", "b)"),
                     ncol = 1, nrow = 2)
 #figure <- annotate_figure(figure, bottom = text_grob("Month"))
 figure
@@ -395,8 +346,10 @@ p3 <- ggplot()+
 
 p3
 
-car::leveneTest(meanHRoverlap~Class,CrocMetrics)
+hist(CrocMetrics$HRoverlap)
 
-fit2 = aov(meanHRoverlap~Class,CrocMetrics)
-summary(fit2)
-TukeyHSD(fit2)
+model3 <- lmer(HRoverlap ~ Class + (1|TRANSMITTERID), data = CrocMetrics)
+
+check_model(model3)
+
+car::Anova(model3, test.statistic = "F")
